@@ -29,6 +29,7 @@ void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 
 void on_client_write_cb(uv_write_t *req, int status)
 {
+    uv_handle_t *client_handle = (uv_handle_t *)req->data;
     if (status < 0)
     {
         LOG_ERR("unable to write to client", status);
@@ -36,7 +37,7 @@ void on_client_write_cb(uv_write_t *req, int status)
     else
     {
         LOG("client disconnected");
-        uv_close((uv_handle_t *)&client, NULL);
+        uv_close(client_handle, NULL);
     }
 }
 
@@ -59,6 +60,7 @@ void on_file_read_cb(uv_fs_t *req)
     {
         uv_write_t write_handle;
         uv_write(&write_handle, client_stream, &read_buffer, 1, on_client_write_cb);
+        write_handle.data = client_stream;
         uv_fs_read(loop, &read_req, open_req.result, &read_buffer, 1, -1, on_file_read_cb);
     }
 }
