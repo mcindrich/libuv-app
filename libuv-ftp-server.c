@@ -43,7 +43,9 @@ void on_client_write_cb(uv_write_t *req, int status)
 
 void on_file_read_cb(uv_fs_t *req)
 {
-    uv_stream_t *client_stream = req->data;
+    uv_stream_t *client_stream = (uv_stream_t *)open_req.data;
+    uv_buf_t *fr_buffer = (uv_buf_t *)read_req.data;
+
     if (req->result < 0)
     {
         LOG_ERR("error reading file on server", req->result);
@@ -55,13 +57,16 @@ void on_file_read_cb(uv_fs_t *req)
         uv_close((uv_handle_t *)client_stream, NULL);
         // free the malloc'd client from on_new_connection_cb
         free(client_stream);
+        free(fr_buffer->base);
+        free(fr_buffer);
     }
     else if (req->result >= 0)
     {
         uv_write_t write_handle;
-        uv_write(&write_handle, client_stream, &read_buffer, 1, on_client_write_cb);
         write_handle.data = client_stream;
-        uv_fs_read(loop, &read_req, open_req.result, &read_buffer, 1, -1, on_file_read_cb);
+
+        uv_write(&write_handle, client_stream, fr_buffer, 1, on_client_write_cb);
+        // uv_fs_read(loop, &read_req, open_req.result, &read_buffer, 1, -1, on_file_read_cb);
     }
 }
 
@@ -74,10 +79,13 @@ void on_file_open_cb(uv_fs_t *req)
     }
     else
     {
-        read_buffer = uv_buf_init(buffer, sizeof(buffer));
-        // pass data forward for reading
-        read_req.data = open_req.data;
-        uv_fs_read(loop, &read_req, open_req.result, &read_buffer, 1, -1, on_file_read_cb);
+        uv_buf_t *file_read_buffer = (uv_buf_t *)malloc(sizeof(uv_buf_t));
+        char *str_buffer = (char *)malloc(sizeof(char) * MAX_BUFFER_SIZE);
+
+        read_req.data = file_read_buffer;
+
+        *file_read_buffer = uv_buf_init(str_buffer, sizeof(char) * MAX_BUFFER_SIZE);
+        uv_fs_read(loop, &read_req, open_req.result, file_read_buffer, 1, -1, on_file_read_cb);
     }
 }
 
@@ -85,12 +93,10 @@ void on_read_cb(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
 {
     if (nread > 0)
     {
-        write_req_t *req = (write_req_t *)malloc(sizeof(write_req_t));
-        req->buf = uv_buf_init(buf->base, nread);
-
         // assume that the filename is short for now => just an example
-        char *filename = req->buf.base;
+        char *filename = buf->base;
         open_req.data = client;
+
         uv_fs_open(loop, &open_req, (const char *)filename, O_RDONLY, 0, on_file_open_cb);
         return;
     }
@@ -102,7 +108,6 @@ void on_read_cb(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
         }
         uv_close((uv_handle_t *)client, NULL);
     }
-
     free(buf->base);
 }
 
@@ -111,7 +116,6 @@ void on_new_connection_cb(uv_stream_t *server, int status)
     if (status < 0)
     {
         LOG_ERR("connection error", status);
-        // error!
         return;
     }
 
